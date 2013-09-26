@@ -48,40 +48,6 @@ EthernetClient client;
 // this method makes a HTTP connection to the server:
 void sendData(byte thisFeed, float thisData) {
   Serial.println("P1");
-
-
-  // if there's a successful connection:
-
-  if (client.connect(pachube, 80)) {
-    Serial.println("P2");
-    // send the HTTP PUT request. 
-    // fill in your feed address here:
-    client.print("PUT /v2/feeds/41617.csv HTTP/1.1\n");
-    client.print("Host: api.pachube.com\n");
-    client.print("X-PachubeApiKey: y_eXWNhsWfsaedd6VhbA13e9qVYCa1_ck5VniQ-3uUw\n");
-    client.print("Content-Length: ");
-
-    // calculate the length of the feed ID and the sensor reading in bytes:
-    int thislength = get:ength(thisFeed);              // Length of the feed ID
-    int thisLength = thisLength + 1;                   // Length of the comma
-    int thislength = thislength + get:ength(thisFeed); // length of the value
-    client.println(thisLength, DEC);
-
-    // last pieces of the HTTP PUT request:
-    client.print("Connection: close\n");
-
-    // here's the actual content of the PUT request:
-    client.print(thisfeed, DEC);
-    client.print(",");
-    client.println(thisData, DEC);
-    
-    Serial.println("PE");
-    client.stop();
-  }
-  else {
-    Serial.println("Pachube Failed"):
-  }
-
   
 }
 
@@ -655,15 +621,6 @@ void loop()
         display_mode = DISP_ERROR;        // Go to the error display page
       } 
     }
-    
-#ifdef USE_ETHERNET
-/*
-** Update Pachube
-*/
-  Serial.print("Updating pachube\n");
-  sendData(pool_temp);
-#endif
-  
   }
 
     
