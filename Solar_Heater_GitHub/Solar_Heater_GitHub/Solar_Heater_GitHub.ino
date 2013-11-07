@@ -9,7 +9,7 @@
 ** the check the temperature
 */
 
-#define PROJECT_NAME "Solar Master V3.0"
+#define PROJECT_NAME "Solar Master V3.1"
 
 
 #include <stdlib.h>
@@ -538,7 +538,8 @@ if ( (month < SEASON_END) || (month > SEASON_START) ) {
         }
       }
     } else {
-      pump_on = false;    // If the sensors give errors, turn the pump off. The error will be logged in COSM
+      digitalWrite(SOLARPUMP, LOW);         // If the sensors give errors, turn the pump off. The error will be logged in COSM
+      pump_on = false;
     }
   }  // End of summertime routines
 
@@ -598,6 +599,12 @@ if ( (month < SEASON_END) || (month > SEASON_START) ) {
         Wire.write(decToBcd(month));
         Wire.write(decToBcd(year));
         Wire.endTransmission();
+        
+        // Once we get the time wait one minute so the minute counter can tick over. This means we will try every second for the one
+        // minute of 04:00 until we get the time, at which point we sleep for one minute and continue. This allows 60 retried per day
+        // to maximise the chance of success, but also that we stop once we are successful to minimise the load on the tytime server
+        // as it's only single threaded and others may also want to get the time.
+        delay(60000);
       }
     }
   }
