@@ -14,6 +14,7 @@
  **       - Agregated all minute resolution checks into one block
  **       - Added support for regular flushing fo the array in winter
  **       - Added protection mode for array overheating
+ **       - Added time of day restrictions to the pump startup
  **
  ** V3.2  - Changed board to optiboot to find additional space
  **
@@ -140,8 +141,10 @@ byte old_hour = 0;             // To track the hours going by for relative timin
 /*
 ** This is the correct way around for the Southern Hemishpere
 */
-#define SEASON_END    March
-#define SEASON_START  July
+#define SEASON_END    March    // After this it's getting too cold
+#define SEASON_START  July     // The system starts on the last day of the month
+#define START_HOUR    8        // Don't start before this time
+#define END_HOUR      18       // Don't continue after this time
 
 
 /******************************************************************
@@ -507,10 +510,14 @@ void loop()
 ** Figure out what the pump should be doing
 ** We should turn the pump on when the roof array is hotter than the pool and off
 ** when the return temperature is the same as the pool. The hysteresis factors are
-** to allow for inefficencies in the system and inaccuracies in the temperature probes
+** to allow for inefficencies in the system and inaccuracies in the temperature probes.
+** THe decission to start the pump only occours if 
+**  - it is the correct season AND
+**  - it is between the start and end hours AND
+**  - there were no sensor errors.
 */
 
-    if ((sensor_errors == 0) && (pump_hold_timer == 0)) {
+    if ((sensor_errors == 0) && (pump_hold_timer == 0) && ((hour > START_HOUR) || (hour < END_HOUR)) ) {
       if (pump_on == false) {
         if( array_temp > ( pool_temp + ON_HYSTERESIS) ) {
           digitalWrite(SOLARPUMP, HIGH);   // Turn pump on
@@ -527,7 +534,7 @@ void loop()
       }
     } 
     else {
-      digitalWrite(SOLARPUMP, LOW);         // If the sensors give errors, turn the pump off. The error will be logged in COSM
+      digitalWrite(SOLARPUMP, LOW);         // If the sensors give errors, or it's out of hours, turn the pump off.
       pump_on = false;
     }
   }  // End of summertime routines
@@ -565,8 +572,7 @@ void loop()
     digitalWrite(POOLFILLVALVE, LOW);             // Turn pool fill valve off in case it was on
     fill_on = false;                              // The valve is now off
     pool_fill_rem = 0;                            // No filling, but everything OK
-    error_no = NO_ERR;                            // CLear the error flag
-    display_mode = DISP_TEMP;                     // Go to the temperature display page
+    error_no = NO_ERR;                            // Clear the error flag
   }
 
 /*
@@ -720,8 +726,6 @@ void loop()
 /*
 ** Shed Fan
 ** This figures out what the shed fan should do to keep the shed cool.
-** There shouldn't be a need for any hysteresis on this as the thermal mass
-** of the shed should do the job.
 */
   if(shed_temp > MAX_SHED_TEMP) {
     digitalWrite(SHEDFAN, HIGH);      // Turn fan on
@@ -741,7 +745,6 @@ void loop()
     digitalWrite(SOLARPUMP, LOW);     // Turn pump off
     pump_on = false;
     man_pump_set = DEFAULT_RUN_TIME;  // Go back to default value for manual run minutes, ready for next time
-    display_mode = DISP_TEMP;         // Go back to the default display
   }
 
 
@@ -778,7 +781,6 @@ void loop()
     fill_on = -1;                        // Block future filling till someone resets the error
     error_no = ERR_FILL;                 // Flag the error
     display_mode = DISP_ERROR;           // Go to the error display page
-    pool_fill_rem = 0;              
   }
 
   
