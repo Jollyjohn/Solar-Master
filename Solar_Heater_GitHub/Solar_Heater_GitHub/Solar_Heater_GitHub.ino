@@ -163,7 +163,8 @@ EthernetClient client;                    // We are a client meaning we call the
 
 // Pachube data
 #define PACHUBE_FEED "41617"
-#define PACHUBE_KEY  "y_eXWNhsWfsaedd6VhbA13e9qVYCa1_ck5VniQ-3uUw"
+//#define PACHUBE_KEY  "y_eXWNhsWfsaedd6VhbA13e9qVYCa1_ck5VniQ-3uUw"
+#include "pachube_key.h"
 #define PACHUBE_SERV "api.cosm.com"
 int pachube_port = 80;                    // Normally 80; can be changed for debugging
 char pachube_data[10];                    // 10 char maximum on any single value point send to PACHUBE, including channel number and comma
