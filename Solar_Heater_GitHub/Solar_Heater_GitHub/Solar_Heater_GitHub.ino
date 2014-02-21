@@ -24,7 +24,7 @@
  ** V3.0  - migrated to GitHub
  */
 
-#define PROJECT_NAME "Solar Master 4.0"
+#define PROJECT_NAME "Solar Master 4.1"
 
 #include <stdlib.h>
 
@@ -163,7 +163,6 @@ EthernetClient client;                    // We are a client meaning we call the
 
 // Pachube data
 #define PACHUBE_FEED "41617"
-//#define PACHUBE_KEY  "y_eXWNhsWfsaedd6VhbA13e9qVYCa1_ck5VniQ-3uUw"
 #include "pachube_key.h"
 #define PACHUBE_SERV "api.cosm.com"
 int pachube_port = 80;                    // Normally 80; can be changed for debugging
@@ -232,7 +231,7 @@ byte second, minute, hour, dayOfWeek, dayOfMonth, month, year;
 #define TEMPERATURE_PRECISION 10    // 10 bits of precision for temperature sampling is enough (makes the ADC process faster)
 
 DeviceAddress shed_sensor =   { 0x10, 0xFD, 0xAC, 0x05, 0x00, 0x08, 0x00, 0x26 };
-DeviceAddress pool_sensor =   { 0x28, 0x38, 0x7C, 0x60, 0x03, 0x00, 0x00, 0x6A };
+DeviceAddress pool_sensor =   { 0x28, 0xA1, 0x68, 0x2F, 0x05, 0x00, 0x00, 0x85 };
 DeviceAddress flow_sensor =   { 0x28, 0x5B, 0xD9, 0x85, 0x03, 0x00, 0x00, 0xD9 };
 DeviceAddress array_sensor =  { 0x28, 0xC0, 0xC7, 0x85, 0x03, 0x00, 0x00, 0x4E };
 DeviceAddress return_sensor = { 0x28, 0x31, 0xC9, 0x85, 0x03, 0x00, 0x00, 0xA9 };
@@ -518,25 +517,28 @@ void loop()
 **  - there were no sensor errors.
 */
 
-    if ((sensor_errors == 0) && (pump_hold_timer == 0) && ((hour > START_HOUR) || (hour < END_HOUR)) ) {
-      if (pump_on == false) {
-        if( array_temp > ( pool_temp + ON_HYSTERESIS) ) {
-          digitalWrite(SOLARPUMP, HIGH);   // Turn pump on
-          pump_on = true;
-          pump_hold_timer = PUMP_HOLD_OFF;
+    if (pump_hold_timer == 0) {
+      if ((sensor_errors == 0) && ((hour > START_HOUR) || (hour < END_HOUR)) ) {
+        if (pump_on == false) {
+          if( array_temp > ( pool_temp + ON_HYSTERESIS) ) {
+            digitalWrite(SOLARPUMP, HIGH);   // Turn pump on
+            pump_on = true;
+            pump_hold_timer = PUMP_HOLD_OFF;
+          }
+        } 
+        else {
+          if( return_temp < (flow_temp + OFF_HYSTERESIS) ) {
+            digitalWrite(SOLARPUMP, LOW);   // Turn pump off
+            pump_on = false;
+            pump_hold_timer = PUMP_HOLD_OFF;
+          }
         }
       } 
       else {
-        if( return_temp < (flow_temp + OFF_HYSTERESIS) ) {
-          digitalWrite(SOLARPUMP, LOW);   // Turn pump off
-          pump_on = false;
-          pump_hold_timer = PUMP_HOLD_OFF;
-        }
+        digitalWrite(SOLARPUMP, LOW);         // If the sensors give errors, or it's out of hours, turn the pump off.
+        pump_on = false;
+        pump_hold_timer = PUMP_HOLD_OFF;
       }
-    } 
-    else {
-      digitalWrite(SOLARPUMP, LOW);         // If the sensors give errors, or it's out of hours, turn the pump off.
-      pump_on = false;
     }
   }  // End of summertime routines
 
@@ -549,7 +551,7 @@ void loop()
 ** Every day at a set time we flush the solar system. This is to ensure that the solar system stays relatively clean
 ** even through winter.
 */
-  if ((hour == DAILY_FLUSH_HOUR) && (minute == 0)) {      // If it is time to flush the array, turn the pump on
+  if ((hour == DAILY_FLUSH_HOUR) && (minute == 0) && (pump_on == false)) {      // If it is time to flush the array, turn the pump on
     digitalWrite(SOLARPUMP, HIGH);
     pump_on = true;
     man_pump_run = DAILY_FLUSH_TIME;
@@ -558,7 +560,7 @@ void loop()
 /*
 ** If the solar array gets to over 50c turn on the pump for a bit to reduce the temperature and extend the life of the array
 */
-  if( array_temp > 50 ) {
+  if( (array_temp > 50) && (pump_on == false) ) {
     digitalWrite(SOLARPUMP, HIGH);   // Turn pump on
     pump_on = true;
     man_pump_run = PUMP_HOLD_OFF;
@@ -708,14 +710,27 @@ void loop()
     ** than execution cycles.
     */
     
-    if (pool_fill_rem > 0)              // If we are filling the pool with water, have we timed out?
+    if (pool_fill_rem > 0) {                // If we are filling the pool with water, have we timed out?
       pool_fill_rem--;
+      if(pool_fill_rem == 0){               // If we timed out before the pool was full, something may be wrong
+        digitalWrite(POOLFILLVALVE, LOW);   // turn the fill valve off
+        fill_on = -1;                       // Block future filling till someone resets the error
+        error_no = ERR_FILL;                // Flag the error
+        display_mode = DISP_ERROR;          // Go to the error display page
+      }
+    }
  
     if (pump_hold_timer > 0)            // Decrement the hold timer. This time ensures we don't go switching the pump on and off to often.
       pump_hold_timer--;
 
-    if (man_pump_run > 0);              // If we are in manual mode for the pump, have we finished?
+    if (man_pump_run > 0) {             // If we are in manual mode for the pump, decrement the timer
       man_pump_run--;
+      if(man_pump_run == 0) {            // Have we now finished?
+        digitalWrite(SOLARPUMP, LOW);    // Turn pump off
+        pump_on = false;
+        man_pump_set = DEFAULT_RUN_TIME; // Go back to default value for manual run minutes, ready for next time
+      }
+    }
       
     if(F_Switch == false)              // If the water level is still low increase the smoothing counter
       pool_fill_smooth++;
@@ -736,16 +751,6 @@ void loop()
   if(shed_temp < OK_SHED_TEMP) {
     digitalWrite(SHEDFAN, LOW);       // Turn fan off
     fan_on = false;
-  }
-
-
-/*
-** If the pump was running in manual mode, check if the timer has expired
-*/
-  if(man_pump_run == 0) {
-    digitalWrite(SOLARPUMP, LOW);     // Turn pump off
-    pump_on = false;
-    man_pump_set = DEFAULT_RUN_TIME;  // Go back to default value for manual run minutes, ready for next time
   }
 
 
@@ -776,15 +781,6 @@ void loop()
     fill_on = false;                     // The valve is now off
     pool_fill_rem = 0;                   // No filling, but everything OK
   }
-
-  if(pool_fill_rem == 0) {               // If we timed out before the pool was full, something may be wrong
-    digitalWrite(POOLFILLVALVE, LOW);    // turn the fill valve off
-    fill_on = -1;                        // Block future filling till someone resets the error
-    error_no = ERR_FILL;                 // Flag the error
-    display_mode = DISP_ERROR;           // Go to the error display page
-  }
-
-  
 
 /*
 ** Gather user input
