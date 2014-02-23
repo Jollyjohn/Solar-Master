@@ -108,7 +108,7 @@ byte pump_hold_timer = 0;      // The pump can start straight away
 int pool_fill_smooth  = 0;      // Used to smooth the pool level switch for when people are in the pool
 int pool_fill_rem     = -1;     // Tracks how long we have left to fill for. This is a safety stop.
 #define POOL_FILL_SMOOTHED 30   // Number of minutes required to debounce the pool fill float valve
-#define MAX_POOL_FILL_TIME 60   // Only try to fill the pool for two hours before calling no joy.
+#define MAX_POOL_FILL_TIME 120  // Only try to fill the pool for this many minutes before calling no joy.
                                 // (The slow fill rate is so filling won't affect the house water preassure)
 // Display dimming
 byte backlight_timer = 0;      // Counts the number of execution loops between key presses
@@ -446,7 +446,7 @@ void loop()
   }
 
   // Check for the Fill input (not a button, but the float switch in the pool)
-  if((button_pressed <= 865 + BUTTON_DRIFT) && (button_pressed >= 840 - BUTTON_DRIFT)) F_Switch = false; 
+  if((button_pressed <= 880 + BUTTON_DRIFT) && (button_pressed >= 820 - BUTTON_DRIFT)) F_Switch = false; 
 
 
 /*
@@ -710,16 +710,6 @@ void loop()
     ** than execution cycles.
     */
     
-    if (pool_fill_rem > 0) {                // If we are filling the pool with water, have we timed out?
-      pool_fill_rem--;
-      if(pool_fill_rem == 0){               // If we timed out before the pool was full, something may be wrong
-        digitalWrite(POOLFILLVALVE, LOW);   // turn the fill valve off
-        fill_on = -1;                       // Block future filling till someone resets the error
-        error_no = ERR_FILL;                // Flag the error
-        display_mode = DISP_ERROR;          // Go to the error display page
-      }
-    }
- 
     if (pump_hold_timer > 0)            // Decrement the hold timer. This time ensures we don't go switching the pump on and off to often.
       pump_hold_timer--;
 
@@ -731,12 +721,51 @@ void loop()
         man_pump_set = DEFAULT_RUN_TIME; // Go back to default value for manual run minutes, ready for next time
       }
     }
-      
-    if(F_Switch == false)              // If the water level is still low increase the smoothing counter
+    
+    
+    /*
+    ** Pool Filling
+    ** This checks the pool level sensor and decides if the pool needs water added.
+    **
+    ** 1. We need to effectively "debounce" the water level sensor to allow for people
+    **    playing in the pool. We do this by requiring the float valve to be held for a certain number
+    **    of consecutive execution loops.
+    ** 2. We need a timer so failure of the pool sensor won't release too much water.
+    ** 3. We should log how long the fill solinoid was on for to track water usage. (See Pachube section)
+    */
+    
+    // If the water level is low and we are not filling, increment the smoothing counter
+    if((F_Switch == false) && (fill_on == false))  
       pool_fill_smooth++;
-    else
-      pool_fill_smooth = 0;            // If we see the pool as full, then restart the smoothing counter
-  }
+      
+    // If the water has been low for long enough, start filling  
+    if (pool_fill_smooth > POOL_FILL_SMOOTHED) {   
+      digitalWrite(POOLFILLVALVE, HIGH);   // Turn pool fill valve on
+      fill_on = true;                      // The valve is now on
+      pool_fill_rem = MAX_POOL_FILL_TIME;  // Start a timrer to stop the fill if it goes on too long
+      pool_fill_smooth = 0;
+    }
+    
+    // If the water level is no longer low and we are filling, turn off the fill valve
+    if((F_Switch == true) && (fill_on == true))  {  
+        digitalWrite(POOLFILLVALVE, LOW);    // Turn pool fill valve off
+        fill_on = false;                     // The valve is now off
+        pool_fill_rem = 0;                   // No filling, but everything OK
+    }
+    
+    // If we are filling the pool with water, decrement the fill timeout timer
+    if ((fill_on == true) && (pool_fill_rem > 0))  
+      pool_fill_rem--;
+      
+    // If we timed out before the pool was full, something may be wrong  
+    if((fill_on == true) && (pool_fill_rem == 0)) {              
+      digitalWrite(POOLFILLVALVE, LOW);   // turn the fill valve off
+      fill_on = -1;                       // Block future filling till the error is reset
+      error_no = ERR_FILL;                // Flag the error
+      display_mode = DISP_ERROR;          // Go to the error display page
+    }
+    
+  } /* End fo minute by minute functions */
 
 
 /*
@@ -754,33 +783,6 @@ void loop()
   }
 
 
-/*
-** Pool Filling
-** This checks the pool level sensor and decides if the pool needs water added.
-**
-** 1. We need to effectively "debounce" the water level sensor to allow for people
-**    playing in the pool. We do this by requiring the float valve to be held for a certain number
-**    of consecutive execution loops.
-** 2. We need a timer so failure of the pool sensor won't release too much water.
-** 3. We should log how long the fill solinoid was on for to track water usage. (See Pachube section)
-*/
-
-/*
-** Check if the pool is full
-** If the smoothing counter has counted more than POOL_FILL_SMOOTHED and the pool sensor still shows the pool
-** needs water and we are not already in the process of fill it, then set the fill remaing timer to MAX_POOL_FILL_TIME and start filling.
-*/
-  if ((pool_fill_smooth > POOL_FILL_SMOOTHED) && (fill_on == false)) {
-    digitalWrite(POOLFILLVALVE, HIGH);   // Turn pool fill valve on
-    fill_on = true;                      // The valve is now on
-    pool_fill_rem = MAX_POOL_FILL_TIME;  // Start a timrer to stop the fill if it goes on too long
-  }  
-
-  if (pool_fill_smooth == 0) {           // The water level is now OK
-    digitalWrite(POOLFILLVALVE, LOW);    // Turn pool fill valve off
-    fill_on = false;                     // The valve is now off
-    pool_fill_rem = 0;                   // No filling, but everything OK
-  }
 
 /*
 ** Gather user input
@@ -863,7 +865,6 @@ void loop()
 
   case DISP_TIME:
     // Display the current time from the RTC
-    error_no = NO_ERR;
     lcd.setCursor(0,0);
     lcd.print("Time: ");
     if (hour < 10) lcd.print("0");
@@ -890,7 +891,6 @@ void loop()
 
   case DISP_OTHER:
     // Diagnostic display
-    error_no = NO_ERR;
     lcd.setCursor(0,0);
     lcd.print("C=");
     if ( shed_temp > 0 ) {
@@ -938,7 +938,6 @@ void loop()
 
   case DISP_PUMP:
     // Manual pump timer mode
-    error_no = NO_ERR;
     lcd.setCursor(0,0);
     lcd.print("Timer: Pump ");
     if(pump_on == true) {
